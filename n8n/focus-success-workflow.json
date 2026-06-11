@@ -1,0 +1,326 @@
+{
+  "name": "Alcovia - Focus Success Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "focus-success",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "focus-success"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "sessionId",
+              "value": "={{ $json.body.sessionId }}",
+              "type": "string"
+            },
+            {
+              "id": "s2",
+              "name": "studentId",
+              "value": "={{ $json.body.studentId }}",
+              "type": "string"
+            },
+            {
+              "id": "s3",
+              "name": "coins",
+              "value": "={{ $json.body.coins }}",
+              "type": "number"
+            },
+            {
+              "id": "s4",
+              "name": "streak",
+              "value": "={{ $json.body.streak }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a2-normalize",
+      "name": "Normalize Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ $json.sessionId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a3-validate",
+      "name": "Validate sessionId",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "operation": "find",
+        "collection": "notificationssents",
+        "query": "={{ JSON.stringify({ sessionId: $json.sessionId }) }}",
+        "options": {}
+      },
+      "id": "a4-mongo-check",
+      "name": "Check NotificationsSent",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1.2,
+      "position": [660, 200],
+      "credentials": {
+        "mongoDb": {
+          "id": "CONFIGURE_MONGODB_CREDENTIAL",
+          "name": "Alcovia MongoDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $('Normalize Payload').first().json;\nconst found = $input.all().filter(i => i.json && i.json.sessionId);\n\nif (found.length > 0) {\n  return [{ json: { duplicate: true, sessionId: payload.sessionId } }];\n}\n\nconst message = `🔥 Streak now ${payload.streak} days, +${payload.coins} coins`;\nconst now = new Date().toISOString();\n\nreturn [{\n  json: {\n    duplicate: false,\n    sessionId: payload.sessionId,\n    studentId: payload.studentId,\n    coins: payload.coins,\n    streak: payload.streak,\n    message,\n    sentAt: now,\n    createdAt: now\n  }\n}];"
+      },
+      "id": "a5-dedup",
+      "name": "Dedup Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "d1",
+              "leftValue": "={{ $json.duplicate }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a6-route",
+      "name": "Is New Session?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "i1",
+              "name": "sessionId",
+              "value": "={{ $json.sessionId }}",
+              "type": "string"
+            },
+            {
+              "id": "i2",
+              "name": "sentAt",
+              "value": "={{ $json.sentAt }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a7-prepare-sent",
+      "name": "Prepare NotificationsSent",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1320, 80]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "collection": "notificationssents",
+        "fields": "sessionId,sentAt",
+        "options": {}
+      },
+      "id": "a8-insert-sent",
+      "name": "Insert NotificationsSent",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1.2,
+      "position": [1540, 80],
+      "credentials": {
+        "mongoDb": {
+          "id": "CONFIGURE_MONGODB_CREDENTIAL",
+          "name": "Alcovia MongoDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "l1",
+              "name": "sessionId",
+              "value": "={{ $('Dedup Decision').item.json.sessionId }}",
+              "type": "string"
+            },
+            {
+              "id": "l2",
+              "name": "studentId",
+              "value": "={{ $('Dedup Decision').item.json.studentId }}",
+              "type": "string"
+            },
+            {
+              "id": "l3",
+              "name": "message",
+              "value": "={{ $('Dedup Decision').item.json.message }}",
+              "type": "string"
+            },
+            {
+              "id": "l4",
+              "name": "createdAt",
+              "value": "={{ $('Dedup Decision').item.json.createdAt }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a9-prepare-log",
+      "name": "Prepare NotificationLog",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1760, 80]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "collection": "notificationlogs",
+        "fields": "sessionId,studentId,message,createdAt",
+        "options": {}
+      },
+      "id": "a10-insert-log",
+      "name": "Insert NotificationLog",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1.2,
+      "position": [1980, 80],
+      "credentials": {
+        "mongoDb": {
+          "id": "CONFIGURE_MONGODB_CREDENTIAL",
+          "name": "Alcovia MongoDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"ok\": true,\n  \"notified\": true,\n  \"sessionId\": \"{{ $('Dedup Decision').item.json.sessionId }}\",\n  \"message\": \"{{ $('Dedup Decision').item.json.message }}\"\n}",
+        "options": {}
+      },
+      "id": "a11-respond-ok",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2200, 80]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"ok\": true,\n  \"notified\": false,\n  \"reason\": \"duplicate\",\n  \"sessionId\": \"{{ $json.sessionId }}\"\n}",
+        "options": {}
+      },
+      "id": "a12-respond-dup",
+      "name": "Respond Duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1320, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": false, \"error\": \"sessionId is required\" }",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "a13-respond-invalid",
+      "name": "Respond Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [660, 420]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Normalize Payload", "type": "main", "index": 0 }]]
+    },
+    "Normalize Payload": {
+      "main": [[{ "node": "Validate sessionId", "type": "main", "index": 0 }]]
+    },
+    "Validate sessionId": {
+      "main": [
+        [{ "node": "Check NotificationsSent", "type": "main", "index": 0 }],
+        [{ "node": "Respond Invalid", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check NotificationsSent": {
+      "main": [[{ "node": "Dedup Decision", "type": "main", "index": 0 }]]
+    },
+    "Dedup Decision": {
+      "main": [[{ "node": "Is New Session?", "type": "main", "index": 0 }]]
+    },
+    "Is New Session?": {
+      "main": [
+        [{ "node": "Prepare NotificationsSent", "type": "main", "index": 0 }],
+        [{ "node": "Respond Duplicate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare NotificationsSent": {
+      "main": [[{ "node": "Insert NotificationsSent", "type": "main", "index": 0 }]]
+    },
+    "Insert NotificationsSent": {
+      "main": [[{ "node": "Prepare NotificationLog", "type": "main", "index": 0 }]]
+    },
+    "Prepare NotificationLog": {
+      "main": [[{ "node": "Insert NotificationLog", "type": "main", "index": 0 }]]
+    },
+    "Insert NotificationLog": {
+      "main": [[{ "node": "Respond Success", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
