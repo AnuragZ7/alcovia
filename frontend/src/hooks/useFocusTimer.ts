@@ -15,6 +15,8 @@ export function useFocusTimer({ session, onTimeUp, onFail }: UseFocusTimerOption
   const firedRef = useRef(false);
   const hiddenAtRef = useRef<number | null>(null);
   const backgroundTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onFailRef = useRef(onFail);
+  onFailRef.current = onFail;
 
   useEffect(() => { firedRef.current = false; }, [session?.sessionId]);
 
@@ -37,7 +39,7 @@ export function useFocusTimer({ session, onTimeUp, onFail }: UseFocusTimerOption
         backgroundTimerRef.current = setTimeout(() => {
           if (!firedRef.current) {
             firedRef.current = true;
-            onFail?.(session.sessionId, 'app_switch');
+            onFailRef.current?.(session.sessionId, 'app_switch');
           }
         }, BACKGROUND_FAILURE_MS + 1);
         return;
@@ -48,7 +50,7 @@ export function useFocusTimer({ session, onTimeUp, onFail }: UseFocusTimerOption
       // Fallback for throttled timers that run only after the tab is visible.
       if (awayFor > BACKGROUND_FAILURE_MS && !firedRef.current) {
         firedRef.current = true;
-        onFail?.(session.sessionId, 'app_switch');
+        onFailRef.current?.(session.sessionId, 'app_switch');
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -57,7 +59,7 @@ export function useFocusTimer({ session, onTimeUp, onFail }: UseFocusTimerOption
       clearBackgroundTimer();
       hiddenAtRef.current = null;
     };
-  }, [session?.sessionId, session?.status, onFail]);
+  }, [session?.sessionId, session?.status]);
 
   useEffect(() => {
     if (!session || session.status !== 'RUNNING' || firedRef.current) return;
