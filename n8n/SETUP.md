@@ -107,3 +107,18 @@ curl http://localhost:3001/notifications/logs
 | Backend | `processedsessions` | Express | Double coins/streak |
 | n8n | `notificationssents` | n8n workflow | Double notifications |
 | n8n | `notificationlogs` | n8n workflow | Audit trail |
+
+
+## Durable backend outbox and MongoDB indexes
+
+The backend now queues focus-success notifications in the `notificationoutbox` collection. A worker drains pending jobs every five seconds and retries failures with exponential backoff. If the process crashes during delivery, a stale `SENDING` job is returned to `PENDING`. Delivery is at-least-once; the workflow must deduplicate by sessionId.
+
+Create/verify the unique index used by the n8n dedupe workflow:
+
+```javascript
+use study-app
+db.notificationssents.createIndex({ sessionId: 1 }, { unique: true })
+db.notificationoutbox.createIndex({ sessionId: 1 }, { unique: true })
+```
+
+If `notificationssents` already contains duplicate session IDs, clean those duplicates before creating the unique index. The unique index is necessary because a check-then-insert workflow alone is not safe under concurrent webhook executions.
