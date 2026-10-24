@@ -56,8 +56,6 @@ npm install
 npm run dev
 ```
 
-The README and source code describe the current implementation. Original commit history is retained; later contributions should be attributed through their own Git commits.
-
 ## Documentation
 
 - [n8n integration](backend/docs/N8N_INTEGRATION.md)
