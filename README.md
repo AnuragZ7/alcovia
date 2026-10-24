@@ -1,6 +1,6 @@
 # Alcovia — Offline-First Learning Application
 
-A learning app demonstrating offline-first study tracking, focus sessions, rewards, syllabus progress, and event-based synchronization between devices.
+An offline-first study-tracking demo with focus sessions, rewards, syllabus progress, multi-client event synchronization, and n8n notification automation.
 
 **Project maintainer:** Anurag Kumar ([AnuragZ7](https://github.com/AnuragZ7))
 
@@ -9,69 +9,71 @@ A learning app demonstrating offline-first study tracking, focus sessions, rewar
 Device A (React + IndexedDB) <--> Express + MongoDB <--> n8n  
 Device B (React + IndexedDB) <--> Express + MongoDB
 
-## Tech stack
+## Stack
 
 | Layer | Technology |
 |---|---|
 | Frontend | React, TypeScript, Vite, IndexedDB via idb |
-| Backend | Express.js, TypeScript, MongoDB, Mongoose |
+| Backend | Express, TypeScript, MongoDB, Mongoose |
 | Automation | n8n webhook workflow |
+| CI | GitHub Actions: backend build/tests and frontend build |
 
 ## Features
 
-- Focus sessions: start, complete, or fail sessions; successful sessions award coins and update streak and focus time.
-- Syllabus tracking: subjects, chapters, tasks, and completion progress.
-- Offline-first local writes using per-device IndexedDB databases.
-- Event-based synchronization and event-ID deduplication.
-- Version-vector-based task conflict handling and deletion tombstones.
-- Developer panel for two-client connectivity toggles, state inspection, and logs.
-- Exported n8n workflow for focus-success notifications.
-
-## Project structure
-
-- backend/ — Express API, MongoDB models, routes, and services
-- frontend/ — React web client, IndexedDB storage, and synchronization services
-- n8n/ — exported workflow and setup instructions
-- DECISIONS.md — data model, merge strategy, idempotency, and known limitations
-- DEMO_CHECKLIST.md — manual end-to-end verification and video checklist
+- Focus sessions from 25–120 minutes, with success rewards and explicit give-up/app-switch failure reasons.
+- Subject, chapter, and task progress tracking.
+- Offline local writes and per-device IndexedDB storage.
+- Event sync with stable IDs, version vectors, duplicate event handling, and deterministic status conflict priority.
+- Atomic per-session reward ledger in StudentState to prevent double rewards on replay.
+- Durable notification outbox with retries, backoff, and stale-job recovery.
+- n8n notification workflow with sessionId deduplication.
+- Developer panel for simulated device connectivity, state inspection, and logs.
 
 ## Run locally
 
-Prerequisites: Node.js 18+ and a running MongoDB instance.
+Prerequisites: Node.js 22 recommended and MongoDB.
 
-### 1. Backend
+### Backend
 
     cd backend
     cp .env.example .env
-    npm install
+    npm ci
     npm run dev
 
-Set the MongoDB connection string and optional n8n webhook URL in backend/.env. Do not commit secrets.
+Configure MONGODB_URI and N8N_WEBHOOK_URL in backend/.env. Never commit secrets.
 
-### 2. Frontend
+### Frontend
 
-In a second terminal:
+In another terminal:
 
     cd frontend
-    npm install
+    npm ci
     npm run dev
 
-Open the Vite URL. Use two isolated browser sessions and choose different device labels in the developer panel to test independent local stores.
+Open the Vite URL in two isolated browser sessions and select different device labels in the developer panel.
 
-### 3. n8n
+### n8n
 
-1. Start or open an n8n instance.
-2. Import n8n/focus-success-workflow.json.
-3. Configure the MongoDB credential referenced by the workflow.
-4. Set N8N_WEBHOOK_URL in the backend to the workflow's production webhook URL.
-5. Activate the workflow and verify the URL matches the backend configuration.
+1. Start n8n and import n8n/focus-success-workflow.json.
+2. Configure the MongoDB credential to use the same database as the backend.
+3. Activate the workflow and set N8N_WEBHOOK_URL in backend/.env to the production webhook URL.
+4. Create/verify a unique index on notificationssents.sessionId; see n8n/SETUP.md.
 
-The workflow uses sessionId for deduplication. For concurrency-safe behavior, ensure the notificationssents collection has a unique index on sessionId. See n8n/SETUP.md.
+## Automated checks
+
+    cd backend
+    npm test
+    npm run build
+
+    cd ../frontend
+    npm run build
+
+GitHub Actions runs these checks on pushes and pull requests to main.
 
 ## Verification
 
-Use DEMO_CHECKLIST.md to test offline sessions on both devices, conflicting task edits, deletion versus edit, duplicate sync, and n8n notification deduplication.
+Use DEMO_CHECKLIST.md for the two-client offline demo. Test duplicate sync, conflicting task edits, delete/edit races, focus failures, notification retries, and replay after a restart before claiming those scenarios pass.
 
-## Known limitations
+## Limitations
 
-This is a take-home demonstration, not a production-grade sync engine. Server-side reward updates are not transactional, notification delivery does not yet use a durable outbox, and all event-order permutations need automated convergence tests. Read DECISIONS.md before describing guarantees in an interview.
+This is not yet a production-grade sync engine. Notification delivery is at-least-once with receiver-side deduplication; delete-before-create needs stronger tombstone persistence; and full event-order convergence requires more end-to-end tests. See DECISIONS.md.
