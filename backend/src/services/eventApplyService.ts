@@ -61,6 +61,7 @@ async function applyFocusStatus(event: SyncEvent, status: SessionStatus): Promis
   } else if (session.status === 'RUNNING') {
     session.status = status;
     session.completedAt = new Date(event.createdAt);
+    if (status === 'FAILED') session.failureReason = payload.failureReason;
     session.versionVector = mergeVectors(session.versionVector, event.versionVector);
     await session.save();
   }
