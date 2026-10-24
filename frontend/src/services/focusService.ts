@@ -102,8 +102,7 @@ export async function startFocusSession(
 export async function completeFocusSession(
   deviceId: string,
   sessionId: string,
-  studentId: string,
-  failureReason: 'give_up' | 'app_switch' = 'give_up'
+  studentId: string
 ): Promise<FocusSession> {
   const db = await getDb();
   const session = await db.get('focusSessions', sessionId);
@@ -139,7 +138,8 @@ export async function completeFocusSession(
 export async function failFocusSession(
   deviceId: string,
   sessionId: string,
-  studentId: string
+  studentId: string,
+  failureReason: 'give_up' | 'app_switch' = 'give_up'
 ): Promise<FocusSession> {
   const db = await getDb();
   const session = await db.get('focusSessions', sessionId);
