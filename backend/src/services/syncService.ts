@@ -16,10 +16,14 @@ export async function processSync(request: SyncRequest): Promise<SyncResponse> {
   );
 
   for (const event of sortedIncoming) {
-    const isNew = await storeEventIfNew(event);
-    if (isNew) {
-      await applyEvent(event);
+    if (event.studentId !== studentId) {
+      throw new Error('Sync event studentId does not match request studentId');
     }
+    // Always replay domain application after ensuring persistence. The domain
+    // operations are idempotent; this repairs a crash that stored EventStore
+    // but failed before applying a reward or enqueueing its notification.
+    await storeEventIfNew(event);
+    await applyEvent(event);
   }
 
   const knownSet = new Set(knownEventIds);
