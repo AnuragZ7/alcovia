@@ -137,19 +137,21 @@ export async function applyTaskEventFromSync(
   }
 
   if (task.deleted) return;
-  if (!isNewerOrEqual(versionVector, task.versionVector)) return;
-
-  const existingPriority = TASK_STATUS_PRIORITY[task.status];
+  const incomingDominates = isNewerOrEqual(versionVector, task.versionVector) &&
+    isStrictlyNewer(versionVector, task.versionVector);
+  const existingDominates = isNewerOrEqual(task.versionVector, versionVector) &&
+    isStrictlyNewer(task.versionVector, versionVector);
+  const concurrent = !incomingDominates && !existingDominates &&
+    JSON.stringify(versionVector) !== JSON.stringify(task.versionVector);
   const incomingPriority = TASK_STATUS_PRIORITY[status];
+  const existingPriority = TASK_STATUS_PRIORITY[task.status];
 
-  if (
-    isStrictlyNewer(versionVector, task.versionVector) ||
-    incomingPriority >= existingPriority
-  ) {
+  if (incomingDominates || (concurrent && incomingPriority > existingPriority)) {
     task.status = status;
-    task.versionVector = mergeVectors(task.versionVector, versionVector);
-    await db.put('tasks', task);
   }
+  // Deterministic tie-break: concurrent DONE > IN_PROGRESS > NOT_STARTED.
+  task.versionVector = mergeVectors(task.versionVector, versionVector);
+  await db.put('tasks', task);
 }
 
 export async function applyTaskDeleteFromSync(
