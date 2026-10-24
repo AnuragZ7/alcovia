@@ -6,6 +6,7 @@ export interface IStudentState extends Document {
   streak: number;
   todayFocusMinutes: number;
   lastFocusDate: string | null;
+  appliedRewardSessions: string[];
 }
 
 const studentStateSchema = new Schema<IStudentState>(
@@ -15,6 +16,9 @@ const studentStateSchema = new Schema<IStudentState>(
     streak: { type: Number, default: 0 },
     todayFocusMinutes: { type: Number, default: 0 },
     lastFocusDate: { type: String, default: null },
+    // This per-session ledger makes reward application idempotent even if the
+    // process crashes after updating StudentState but before marking a session complete.
+    appliedRewardSessions: { type: [String], default: [] },
   },
   { timestamps: true }
 );
