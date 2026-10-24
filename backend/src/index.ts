@@ -9,6 +9,7 @@ import focusRoutes from './routes/focus';
 import taskRoutes from './routes/tasks';
 import adminRoutes from './routes/admin';
 import notificationRoutes from './routes/notifications';
+import { processNotificationOutboxBatch } from './services/notificationOutboxService';
 
 async function bootstrap() {
   await connectDb();
@@ -27,23 +28,29 @@ async function bootstrap() {
   app.use('/tasks', taskRoutes);
   app.use('/admin', adminRoutes);
   app.use('/notifications', notificationRoutes);
-
   app.use(errorHandler);
+
+  // Durable outbox entries survive restarts. Failed deliveries retry with
+  // backoff; n8n deduplicates requests that were accepted before a crash.
+  const drainOutbox = () => {
+    void processNotificationOutboxBatch().catch((error) =>
+      console.error('[notification-outbox] worker failed', error)
+    );
+  };
+  drainOutbox();
+  const outboxTimer = setInterval(drainOutbox, 5000);
+  outboxTimer.unref();
 
   const server = app.listen(env.port, () => {
     console.log(`Alcovia API running on http://localhost:${env.port}`);
   });
-
   server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
-      console.error(
-        `Port ${env.port} is already in use. Stop the other process or change PORT in .env`
-      );
+      console.error(`Port ${env.port} is already in use. Stop the other process or change PORT in .env`);
       console.error(`Windows: netstat -ano | findstr :${env.port}  then  taskkill /PID <pid> /F`);
       process.exit(1);
     }
     throw err;
   });
 }
-
 bootstrap().catch(console.error);
