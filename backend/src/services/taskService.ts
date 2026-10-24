@@ -107,19 +107,22 @@ export async function updateTaskStatus(
 
   if (task.deleted) return task;
 
-  if (!isNewerOrEqual(versionVector, task.versionVector)) return task;
-
-  const existingPriority = TASK_STATUS_PRIORITY[task.status];
+  const incomingDominates = isNewerOrEqual(versionVector, task.versionVector) &&
+    isStrictlyNewer(versionVector, task.versionVector);
+  const existingDominates = isNewerOrEqual(task.versionVector, versionVector) &&
+    isStrictlyNewer(task.versionVector, versionVector);
+  const concurrent = !incomingDominates && !existingDominates &&
+    JSON.stringify(versionVector) !== JSON.stringify(task.versionVector);
   const incomingPriority = TASK_STATUS_PRIORITY[status];
+  const existingPriority = TASK_STATUS_PRIORITY[task.status];
 
-  if (
-    isStrictlyNewer(versionVector, task.versionVector) ||
-    incomingPriority >= existingPriority
-  ) {
+  if (incomingDominates || (concurrent && incomingPriority > existingPriority)) {
     task.status = status;
-    task.versionVector = mergeVectors(task.versionVector, versionVector);
-    await task.save();
   }
+  // Merge the causal knowledge even when the current status wins the tie-break.
+  // This makes a later replay of either concurrent event deterministic.
+  task.versionVector = mergeVectors(task.versionVector, versionVector);
+  await task.save();
 
   return task;
 }
@@ -165,21 +168,20 @@ export async function applyTaskStatusFromEvent(
 
   if (task.deleted) return task;
 
-  if (!isNewerOrEqual(versionVector, task.versionVector)) {
-    return task;
-  }
-
-  const existingPriority = TASK_STATUS_PRIORITY[task.status];
+  const incomingDominates = isNewerOrEqual(versionVector, task.versionVector) &&
+    isStrictlyNewer(versionVector, task.versionVector);
+  const existingDominates = isNewerOrEqual(task.versionVector, versionVector) &&
+    isStrictlyNewer(task.versionVector, versionVector);
+  const concurrent = !incomingDominates && !existingDominates &&
+    JSON.stringify(versionVector) !== JSON.stringify(task.versionVector);
   const incomingPriority = TASK_STATUS_PRIORITY[status];
+  const existingPriority = TASK_STATUS_PRIORITY[task.status];
 
-  if (
-    isStrictlyNewer(versionVector, task.versionVector) ||
-    incomingPriority >= existingPriority
-  ) {
+  if (incomingDominates || (concurrent && incomingPriority > existingPriority)) {
     task.status = status;
-    task.versionVector = mergeVectors(task.versionVector, versionVector);
-    await task.save();
   }
+  task.versionVector = mergeVectors(task.versionVector, versionVector);
+  await task.save();
 
   return task;
 }
