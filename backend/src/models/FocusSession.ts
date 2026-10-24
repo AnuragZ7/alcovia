@@ -8,6 +8,7 @@ export interface IFocusSession extends Document {
   status: SessionStatus;
   startedAt?: Date;
   completedAt?: Date;
+  failureReason?: 'give_up' | 'app_switch';
   versionVector: Record<string, number>;
 }
 
@@ -23,6 +24,7 @@ const focusSessionSchema = new Schema<IFocusSession>(
     },
     startedAt: { type: Date },
     completedAt: { type: Date },
+    failureReason: { type: String, enum: ['give_up', 'app_switch'] },
     versionVector: { type: Schema.Types.Mixed, default: {} },
   },
   { timestamps: true }
