@@ -52,6 +52,7 @@ async function applyFocusStatus(event: SyncEvent, status: SessionStatus): Promis
         sessionId: payload.sessionId, studentId: event.studentId,
         targetMinutes: payload.targetMinutes, status,
         startedAt: new Date(event.createdAt), completedAt: new Date(event.createdAt),
+        failureReason: status === 'FAILED' ? payload.failureReason : undefined,
         versionVector: event.versionVector,
       });
     } catch (error: unknown) {
