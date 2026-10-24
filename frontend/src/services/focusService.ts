@@ -102,7 +102,8 @@ export async function startFocusSession(
 export async function completeFocusSession(
   deviceId: string,
   sessionId: string,
-  studentId: string
+  studentId: string,
+  failureReason: 'give_up' | 'app_switch' = 'give_up'
 ): Promise<FocusSession> {
   const db = await getDb();
   const session = await db.get('focusSessions', sessionId);
@@ -146,6 +147,7 @@ export async function failFocusSession(
   if (session.status !== 'RUNNING') return session;
 
   session.status = 'FAILED';
+  session.failureReason = failureReason;
   session.completedAt = new Date().toISOString();
   await db.put('focusSessions', session);
 
@@ -154,6 +156,7 @@ export async function failFocusSession(
     studentId,
     targetMinutes: session.targetMinutes,
     status: 'FAILED',
+    failureReason,
     completedAt: session.completedAt,
   });
 
@@ -197,6 +200,7 @@ export async function applyFocusEventFromSync(
     };
   } else if (session.status === 'RUNNING') {
     session.status = status;
+    if (status === 'FAILED') session.failureReason = payload.failureReason as 'give_up' | 'app_switch' | undefined;
     session.completedAt = (payload.completedAt as string) || new Date().toISOString();
   }
 
