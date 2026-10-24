@@ -1,7 +1,7 @@
 import { ProcessedSession } from '../models/ProcessedSession';
 import { StudentState } from '../models/StudentState';
-import { triggerFocusSuccessWorkflow } from '../integrations/n8n/focusSuccessWebhook';
 import { FOCUS_REWARD_COINS } from '../types';
+import { enqueueFocusSuccessNotification } from './notificationOutboxService';
 
 export interface RewardResult {
   processed: boolean;
@@ -10,103 +10,110 @@ export interface RewardResult {
   streak?: number;
 }
 
-function todayDateString(): string {
-  return new Date().toISOString().split('T')[0];
+function dateString(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
-async function getOrCreateStudentState(studentId: string) {
-  let state = await StudentState.findOne({ studentId });
-  if (!state) {
-    state = await StudentState.create({
-      studentId,
-      coins: 0,
-      streak: 0,
-      todayFocusMinutes: 0,
-      lastFocusDate: null,
-    });
+async function ensureStudentState(studentId: string): Promise<void> {
+  try {
+    await StudentState.updateOne(
+      { studentId },
+      { $setOnInsert: { studentId, coins: 0, streak: 0, todayFocusMinutes: 0, lastFocusDate: null, appliedRewardSessions: [] } },
+      { upsert: true }
+    );
+  } catch (error: unknown) {
+    if ((error as { code?: number }).code !== 11000) throw error;
   }
-  return state;
 }
 
 /**
- * Idempotent reward + n8n trigger for a successful focus session.
- *
- * Exactly-once rewards: atomic claim via ProcessedSessions unique sessionId.
- * Exactly-once notifications: n8n workflow checks NotificationsSent collection.
+ * Apply one reward using a per-session ledger in StudentState. A retry after a
+ * crash sees appliedRewardSessions and will not increment the counters twice.
+ * The outbox is durable and retried independently of the incoming sync event.
  */
 export async function processSessionReward(
   sessionId: string,
   studentId: string,
   targetMinutes: number
 ): Promise<RewardResult> {
-  const existing = await ProcessedSession.findOne({ sessionId }).lean();
-  if (existing) {
-    return { processed: false, webhookTriggered: false };
+  if (!sessionId || !studentId || !Number.isFinite(targetMinutes) || targetMinutes <= 0) {
+    throw new Error('Valid sessionId, studentId, and targetMinutes are required');
   }
 
-  let claimed = false;
-  try {
-    await ProcessedSession.create({
-      sessionId,
-      studentId,
-      processedAt: new Date(),
-      coinsAwarded: FOCUS_REWARD_COINS,
-    });
-    claimed = true;
-  } catch (error: unknown) {
-    const mongoError = error as { code?: number };
-    if (mongoError.code === 11000) {
-      return { processed: false, webhookTriggered: false };
+  const existingProcessed = await ProcessedSession.findOne({ sessionId }).lean();
+  if (existingProcessed) {
+    const state = await StudentState.findOne({ studentId }).lean();
+    if (state) {
+      await enqueueFocusSuccessNotification({
+        sessionId, studentId, coins: FOCUS_REWARD_COINS, streak: state.streak,
+      });
+      return { processed: false, webhookTriggered: false, coins: FOCUS_REWARD_COINS, streak: state.streak };
     }
-    throw error;
   }
 
-  if (!claimed) {
-    return { processed: false, webhookTriggered: false };
-  }
+  await ensureStudentState(studentId);
+  const today = dateString(new Date());
+  const yesterdayDate = new Date();
+  yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
+  const yesterday = dateString(yesterdayDate);
 
-  const state = await getOrCreateStudentState(studentId);
-  const today = todayDateString();
+  // CAS loop: if another session updates the student's day/streak first, read
+  // the new state and retry with its current lastFocusDate and ledger.
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const current = await StudentState.findOne({ studentId }).lean();
+    if (!current) throw new Error('Student state could not be initialized');
 
-  if (state.lastFocusDate === today) {
-    state.todayFocusMinutes += targetMinutes;
-  } else {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    if ((current.appliedRewardSessions ?? []).includes(sessionId)) break;
 
-    if (state.lastFocusDate === yesterdayStr) {
-      state.streak += 1;
-    } else if (state.lastFocusDate !== today) {
-      state.streak = 1;
+    const lastDate = current.lastFocusDate ?? null;
+    let streak = current.streak;
+    let todayFocusMinutes: number;
+    let lastFocusDate = today;
+
+    if (lastDate === today) {
+      todayFocusMinutes = current.todayFocusMinutes + targetMinutes;
+    } else {
+      streak = lastDate === yesterday ? current.streak + 1 : 1;
+      todayFocusMinutes = targetMinutes;
     }
-    state.todayFocusMinutes = targetMinutes;
-    state.lastFocusDate = today;
-  }
 
-  state.coins += FOCUS_REWARD_COINS;
-  await state.save();
-
-  let webhookTriggered = false;
-  try {
-    await triggerFocusSuccessWorkflow({
-      sessionId,
-      studentId,
-      coins: FOCUS_REWARD_COINS,
-      streak: state.streak,
-    });
-    webhookTriggered = true;
-  } catch (error) {
-    console.error(
-      `[focusReward] Rewards granted but n8n webhook failed for ${sessionId}. ` +
-        'Retry sync will not re-award (ProcessedSessions). Webhook is safe to retry.',
-      error
+    const update = await StudentState.updateOne(
+      { studentId, lastFocusDate: lastDate, appliedRewardSessions: { $ne: sessionId } },
+      {
+        $inc: { coins: FOCUS_REWARD_COINS },
+        $set: { streak, todayFocusMinutes, lastFocusDate },
+        $addToSet: { appliedRewardSessions: sessionId },
+      }
     );
+    if (update.modifiedCount === 1) break;
+    if (attempt === 11) throw new Error('Could not atomically apply reward after retries');
   }
+
+  // The ledger above is the source of truth. This marker is useful for auditing,
+  // but a crash before this insert is safe: a retry will observe the ledger.
+  try {
+    await ProcessedSession.updateOne(
+      { sessionId },
+      { $setOnInsert: { sessionId, studentId, processedAt: new Date(), coinsAwarded: FOCUS_REWARD_COINS } },
+      { upsert: true }
+    );
+  } catch (error: unknown) {
+    if ((error as { code?: number }).code !== 11000) throw error;
+  }
+
+  const state = await StudentState.findOne({ studentId }).lean();
+  if (!state) throw new Error('Student state missing after reward processing');
+
+  await enqueueFocusSuccessNotification({
+    sessionId,
+    studentId,
+    coins: FOCUS_REWARD_COINS,
+    streak: state.streak,
+  });
 
   return {
     processed: true,
-    webhookTriggered,
+    webhookTriggered: false,
     coins: FOCUS_REWARD_COINS,
     streak: state.streak,
   };
