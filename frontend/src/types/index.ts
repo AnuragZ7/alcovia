@@ -40,6 +40,7 @@ export interface FocusSession {
   status: SessionStatus;
   startedAt: string;
   completedAt?: string;
+  failureReason?: 'give_up' | 'app_switch';
 }
 
 export interface Task {
